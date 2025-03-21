@@ -94,22 +94,6 @@ def main():
             # Get current user ID
             user_id = st.session_state['user']['user_id']
             
-            # Load extraction settings and update extractor flags
-            use_llm_extraction = db.get_setting(conn, user_id, "use_llm_extraction", "false").lower() == "true"
-            use_parallel_llm = db.get_setting(conn, user_id, "use_parallel_llm_extraction", "true").lower() == "true"
-            
-            # Set extractor flags based on saved settings
-            extractor.USE_LLM_EXTRACTION = use_llm_extraction
-            extractor.USE_PARALLEL_LLM_EXTRACTION = use_parallel_llm
-            
-            # Log which extraction method is being used
-            if use_parallel_llm:
-                logging.info("Starting with parallel LLM extraction enabled")
-            elif use_llm_extraction:
-                logging.info("Starting with regular LLM extraction enabled")
-            else:
-                logging.info("Starting with regex extraction enabled")
-            
             # Create tabs for different fetch options
             fetch_tabs = st.tabs(["Quick Fetch", "Custom Fetch"])
             
@@ -196,19 +180,7 @@ def main():
                             if message_data_list:
                                 # Process email messages
                                 with st.spinner('Processing email messages, this may take some time...'):
-                                    # Get batch size and worker settings
-                                    batch_size = int(db.get_setting(conn, user_id, "parallel_batch_size", "10"))
-                                    max_workers = int(db.get_setting(conn, user_id, "parallel_max_workers", "4"))
-                                    max_retries = int(db.get_setting(conn, user_id, "max_retries", "3"))
-                                    field_retries = int(db.get_setting(conn, user_id, "field_retries", "2"))
-                                    
-                                    transactions = extractor.process_email_messages(
-                                        message_data_list,
-                                        batch_size=batch_size,
-                                        max_workers=max_workers,
-                                        max_retries=max_retries,
-                                        field_retries=field_retries
-                                    )
+                                    transactions = extractor.process_email_messages(message_data_list)
                                 
                                 # Save transactions to database with user ID
                                 saved_count = db.save_transactions_to_db(conn, user_id, transactions)
@@ -256,19 +228,7 @@ def main():
                             if message_data_list:
                                 # Process email messages
                                 with st.spinner('Processing email messages, this may take some time...'):
-                                    # Get batch size and worker settings
-                                    batch_size = int(db.get_setting(conn, user_id, "parallel_batch_size", "10"))
-                                    max_workers = int(db.get_setting(conn, user_id, "parallel_max_workers", "4"))
-                                    max_retries = int(db.get_setting(conn, user_id, "max_retries", "3"))
-                                    field_retries = int(db.get_setting(conn, user_id, "field_retries", "2"))
-                                    
-                                    transactions = extractor.process_email_messages(
-                                        message_data_list,
-                                        batch_size=batch_size,
-                                        max_workers=max_workers,
-                                        max_retries=max_retries,
-                                        field_retries=field_retries
-                                    )
+                                    transactions = extractor.process_email_messages(message_data_list)
                                 
                                 # Save transactions to database with user ID
                                 saved_count = db.save_transactions_to_db(conn, user_id, transactions)
@@ -415,7 +375,7 @@ def main():
             # Try to identify the largest credit transaction as potential payroll
             if not date_filtered_df.empty and 'Credit' in date_filtered_df['transaction_type'].values:
                 payroll_transactions = date_filtered_df[date_filtered_df['transaction_type'] == 'Credit'].nlargest(1, 'transaction_amount')
-                
+            
                 # Display potential salary information
                 if not payroll_transactions.empty:
                     largest_credit = payroll_transactions.iloc[0]
@@ -601,212 +561,12 @@ def main():
                 else:
                     st.warning("Please login first to manage the database.")
             
-            # LLM Extraction Settings
-            st.write("LLM Extraction Settings")
-            
-            # Check if Ollama is available for either extraction method
-            try:
-                try:
-                    from parallel_llm_extraction import test_ollama_connection as test_parallel_ollama
-                    parallel_ollama_available = test_parallel_ollama()
-                except ImportError:
-                    parallel_ollama_available = False
-                
-                try:
-                    from extractor_llm import test_ollama_connection as test_regular_ollama
-                    regular_ollama_available = test_regular_ollama()
-                except ImportError:
-                    regular_ollama_available = False
-                
-                ollama_available = parallel_ollama_available or regular_ollama_available
-            except Exception:
-                ollama_available = False
-            
-            if ollama_available:
-                # Get current LLM extraction settings
-                use_llm_extraction = db.get_setting(conn, user_id, "use_llm_extraction", "false").lower() == "true"
-                use_parallel_llm = db.get_setting(conn, user_id, "use_parallel_llm_extraction", "true").lower() == "true"
-                
-                # Create radio selection for extraction method
-                extraction_method = st.radio(
-                    "Transaction Extraction Method",
-                    ["Regex (Basic)", "Regular LLM", "Parallel LLM (Recommended)"],
-                    index=2 if use_parallel_llm else (1 if use_llm_extraction else 0),
-                    help="Choose how to extract transaction details from emails"
-                )
-                
-                # Batch size and worker settings for parallel processing
-                if extraction_method == "Parallel LLM (Recommended)":
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        parallel_batch_size = st.number_input(
-                            "Batch Size", 
-                            min_value=1, 
-                            max_value=50, 
-                            value=int(db.get_setting(conn, user_id, "parallel_batch_size", "10")),
-                            help="Number of emails to process in each batch"
-                        )
-                    
-                    with col2:
-                        max_workers = st.number_input(
-                            "Max Workers", 
-                            min_value=1, 
-                            max_value=8, 
-                            value=int(db.get_setting(conn, user_id, "parallel_max_workers", "4")),
-                            help="Maximum number of parallel workers for extraction"
-                        )
-                    
-                    # Add new row for retry configuration
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        max_retries = st.number_input(
-                            "Message Retries",
-                            min_value=0,
-                            max_value=5,
-                            value=int(db.get_setting(conn, user_id, "max_retries", "3")),
-                            help="Number of times to retry processing a message that failed"
-                        )
-                    
-                    with col2:
-                        field_retries = st.number_input(
-                            "Field Retries",
-                            min_value=0,
-                            max_value=5,
-                            value=int(db.get_setting(conn, user_id, "field_retries", "2")),
-                            help="Number of times to retry extracting individual fields before giving up"
-                        )
-                
-                # Information about LLM extraction methods
-                if extraction_method == "Regular LLM":
-                    st.info("""
-                    Regular LLM extraction uses a single Ollama model to extract all transaction details at once.
-                    This is more efficient than regex but less accurate than parallel extraction.
-                    """)
-                elif extraction_method == "Parallel LLM (Recommended)":
-                    st.info("""
-                    Parallel LLM extraction uses multiple specialized Ollama models to extract different 
-                    transaction details in parallel. This provides the most accurate results but uses 
-                    more computational resources.
-                    
-                    This method uses Qwen 0.5B, a lightweight but capable model that's optimized for extraction tasks.
-                    """)
-                else:
-                    st.info("""
-                    Regex extraction uses pattern matching to extract transaction details. 
-                    This is the most basic method and doesn't require Ollama, but it's less accurate 
-                    for complex or non-standard email formats.
-                    """)
-                
-                if st.button("Save Extraction Settings"):
-                    # Update settings based on selected method
-                    if extraction_method == "Parallel LLM (Recommended)":
-                        db.save_setting(conn, user_id, "use_parallel_llm_extraction", "true")
-                        db.save_setting(conn, user_id, "use_llm_extraction", "false")
-                        db.save_setting(conn, user_id, "parallel_batch_size", str(parallel_batch_size))
-                        db.save_setting(conn, user_id, "parallel_max_workers", str(max_workers))
-                        db.save_setting(conn, user_id, "max_retries", str(max_retries))
-                        db.save_setting(conn, user_id, "field_retries", str(field_retries))
-                        
-                        # Update extractor flags
-                        extractor.USE_PARALLEL_LLM_EXTRACTION = True
-                        extractor.USE_LLM_EXTRACTION = False
-                    elif extraction_method == "Regular LLM":
-                        db.save_setting(conn, user_id, "use_parallel_llm_extraction", "false")
-                        db.save_setting(conn, user_id, "use_llm_extraction", "true")
-                        
-                        # Update extractor flags
-                        extractor.USE_PARALLEL_LLM_EXTRACTION = False
-                        extractor.USE_LLM_EXTRACTION = True
-                    else:  # Regex
-                        db.save_setting(conn, user_id, "use_parallel_llm_extraction", "false")
-                        db.save_setting(conn, user_id, "use_llm_extraction", "false")
-                        
-                        # Update extractor flags
-                        extractor.USE_PARALLEL_LLM_EXTRACTION = False
-                        extractor.USE_LLM_EXTRACTION = False
-                    
-                    st.success("Extraction settings saved successfully!")
-                    st.info("The setting will take effect the next time you fetch transaction emails.")
-                
-                # Add debugging information option
-                if st.button("Debug Extraction Configuration"):
-                    debug_info = extractor.get_extraction_config_info()
-                    
-                    # Display active method
-                    if debug_info["active_method"] == "parallel_llm":
-                        st.success("🟢 Active method: Parallel LLM extraction")
-                    elif debug_info["active_method"] == "regular_llm":
-                        st.success("🟡 Active method: Regular LLM extraction")
-                    else:
-                        st.warning("⚠️ Active method: Regex extraction (fallback)")
-                    
-                    # Display configuration details in an expander
-                    with st.expander("View detailed configuration"):
-                        st.write("### Settings")
-                        st.json({
-                            "USE_PARALLEL_LLM_EXTRACTION": debug_info["USE_PARALLEL_LLM_EXTRACTION"],
-                            "USE_LLM_EXTRACTION": debug_info["USE_LLM_EXTRACTION"],
-                            "Retry Settings": debug_info["retry_settings"]
-                        })
-                        
-                        st.write("### Availability")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write("Parallel LLM")
-                            if debug_info["parallel_available"]:
-                                st.success("✅ Available")
-                            else:
-                                st.error("❌ Not Available")
-                                if "parallel_availability_error" in debug_info:
-                                    st.error(f"Error: {debug_info['parallel_availability_error']}")
-                        
-                        with col2:
-                            st.write("Regular LLM")
-                            if debug_info["regular_available"]:
-                                st.success("✅ Available")
-                            else:
-                                st.error("❌ Not Available")
-                                if "regular_availability_error" in debug_info:
-                                    st.error(f"Error: {debug_info['regular_availability_error']}")
-                    
-                    # Provide a troubleshooting guide
-                    with st.expander("Troubleshooting Guide"):
-                        st.markdown("""
-                        ### Common Issues
-                        
-                        1. **Ollama not running**
-                           - Make sure Ollama is installed and running on your system
-                           - Try running `ollama list` in your terminal to check
-                        
-                        2. **Missing models**
-                           - Models are downloaded automatically when first used
-                           - You can manually download: `ollama pull qwen:0.5b` or `ollama pull deepseek-r1:8b`
-                        
-                        3. **Network issues**
-                           - Check if Ollama can connect to the internet for model downloads
-                           - Ollama uses port 11434 by default, make sure it's not blocked
-                        
-                        4. **Missing modules**
-                           - Run `pip install -r requirements.txt` to install all dependencies
-                           - Specifically make sure `pip install ollama agno` is run
-                        """)
-                    
-                    # Stats about CPU/RAM usage
-                    with st.expander("System Resource Usage"):
-                        import psutil
-                        
-                        st.write(f"CPU Usage: {psutil.cpu_percent()}%")
-                        st.write(f"RAM Usage: {psutil.virtual_memory().percent}%")
-                        st.write(f"Available RAM: {psutil.virtual_memory().available / (1024 * 1024 * 1024):.2f} GB")
-            else:
-                st.warning("""
-                LLM extraction methods are not available. To enable these features:
-                1. Install Ollama from https://ollama.ai
-                2. Install the required Python packages: `pip install ollama`
-                3. Restart the application
-                
-                For parallel extraction, the Qwen 0.5B model will be automatically downloaded when needed.
-                """)
+            # Transaction Extraction Information
+            st.write("Transaction Extraction")
+            st.info("""
+            This application uses regular expression (regex) pattern matching to extract transaction details from emails.
+            The extraction process focuses on recognizing common patterns in bank notifications.
+            """)
             
             # Export/Import Settings
             st.write("Export/Import Settings")

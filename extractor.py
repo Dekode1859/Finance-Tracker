@@ -6,39 +6,6 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Flags to determine which extraction method to use
-USE_LLM_EXTRACTION = False
-USE_PARALLEL_LLM_EXTRACTION = False
-
-# Try to import the parallel LLM extractor (preferred)
-try:
-    from parallel_llm_extraction import process_email_messages_with_parallel_llm, test_ollama_connection
-    # Test if Ollama is available
-    if test_ollama_connection():
-        USE_PARALLEL_LLM_EXTRACTION = True
-        logger.info("Parallel LLM extraction is available and will be used by default")
-    else:
-        logger.warning("Parallel LLM extraction is not available, will try regular LLM extraction")
-except ImportError:
-    logger.warning("parallel_llm_extraction module not found, will try regular LLM extraction")
-except Exception as e:
-    logger.error(f"Error initializing parallel LLM extraction: {e}")
-
-# Try to import the regular LLM extractor (fallback)
-if not USE_PARALLEL_LLM_EXTRACTION:
-    try:
-        from extractor_llm import process_email_messages_with_llm, test_ollama_connection
-        # Test if Ollama is available
-        if test_ollama_connection():
-            USE_LLM_EXTRACTION = True
-            logger.info("Regular LLM extraction is available and will be used")
-        else:
-            logger.warning("Regular LLM extraction is not available, falling back to regex extraction")
-    except ImportError:
-        logger.warning("extractor_llm module not found, using regex extraction only")
-    except Exception as e:
-        logger.error(f"Error initializing LLM extraction: {e}")
-
 def extract_transaction_details(body, transaction_id):
     """Extract transaction details from email body using regex, focusing only on amount, type, and balance"""
     # Default values
@@ -97,40 +64,9 @@ def extract_transaction_details(body, transaction_id):
     
     return transaction
 
-def process_email_messages(message_data_list, batch_size=10, max_workers=4, max_retries=3, field_retries=2):
-    """Process raw email message data into transaction objects
-    
-    Args:
-        message_data_list: List of email message data dictionaries
-        batch_size: Number of messages to process in each batch (for LLM processing)
-        max_workers: Maximum number of parallel workers (for parallel LLM processing)
-        max_retries: Maximum number of retry attempts for failed messages (default: 3)
-        field_retries: Number of retries for individual field extractions (default: 2)
-    """
-    # Use parallel LLM processing if available (preferred)
-    if USE_PARALLEL_LLM_EXTRACTION:
-        try:
-            logger.info(f"Using parallel LLM extraction with {max_workers} workers, batch size {batch_size}, and retries {max_retries}/{field_retries}")
-            return process_email_messages_with_parallel_llm(
-                message_data_list, 
-                batch_size=batch_size, 
-                max_workers=max_workers,
-                max_retries=max_retries,
-                field_retries=field_retries
-            )
-        except Exception as e:
-            logger.error(f"Parallel LLM processing failed, falling back to regular LLM extraction: {e}")
-            
-    # Use regular LLM processing if available and parallel failed
-    if USE_LLM_EXTRACTION:
-        try:
-            logger.info(f"Using regular LLM extraction with batch size {batch_size} and retries {max_retries}")
-            return process_email_messages_with_llm(message_data_list, batch_size=batch_size, max_retries=max_retries)
-        except Exception as e:
-            logger.error(f"Regular LLM processing failed, falling back to regex: {e}")
-    
-    # Fall back to regex processing
-    logger.info("Using regex extraction for processing emails")
+def process_email_messages(message_data_list):
+    """Process raw email message data into transaction objects using regex extraction"""
+    logger.info(f"Processing {len(message_data_list)} emails with regex extraction")
     transactions = []
     
     # Process all emails in one batch
@@ -141,51 +77,10 @@ def process_email_messages(message_data_list, batch_size=10, max_workers=4, max_
                 message_data['timestamp']
             ).strftime("%Y-%m-%d %H:%M:%S")
             transactions.append(transaction)
+            logger.info(f"Successfully processed message {message_data['id']}")
         except Exception as e:
             logger.error(f"Failed to process message {message_data['id']}: {e}")
             continue
     
-    return transactions
-
-# Add a function to get debug info about the current extraction configuration
-def get_extraction_config_info():
-    """Get information about the current extraction configuration for debugging"""
-    config_info = {
-        "USE_PARALLEL_LLM_EXTRACTION": USE_PARALLEL_LLM_EXTRACTION,
-        "USE_LLM_EXTRACTION": USE_LLM_EXTRACTION,
-        "parallel_available": False,
-        "regular_available": False,
-        "active_method": "regex",
-        "retry_settings": {
-            "max_retries": 3,  # Default values
-            "field_retries": 2
-        }
-    }
-    
-    # Check parallel availability
-    try:
-        from parallel_llm_extraction import test_ollama_connection
-        config_info["parallel_available"] = test_ollama_connection()
-    except ImportError:
-        config_info["parallel_availability_error"] = "Module not found"
-    except Exception as e:
-        config_info["parallel_availability_error"] = str(e)
-    
-    # Check regular availability
-    try:
-        from extractor_llm import test_ollama_connection
-        config_info["regular_available"] = test_ollama_connection()
-    except ImportError:
-        config_info["regular_availability_error"] = "Module not found"
-    except Exception as e:
-        config_info["regular_availability_error"] = str(e)
-    
-    # Determine which method would be used
-    if USE_PARALLEL_LLM_EXTRACTION and config_info["parallel_available"]:
-        config_info["active_method"] = "parallel_llm"
-    elif USE_LLM_EXTRACTION and config_info["regular_available"]:
-        config_info["active_method"] = "regular_llm"
-    else:
-        config_info["active_method"] = "regex"
-    
-    return config_info 
+    logger.info(f"Completed processing. Extracted {len(transactions)} transactions")
+    return transactions 
