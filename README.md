@@ -32,7 +32,7 @@ To use the HuggingFace sync feature, you'll need:
    - Add the following secrets:
      - `HF_TOKEN`: Your HuggingFace API token
      - `HF_USERNAME`: Your HuggingFace username
-     - Optional: `GIT_EMAIL` and `GIT_NAME` for commit information
+     - Optional: `EMAIL_SECRET` and `GOOGLE_CLIENT_SECRET` if your app needs them
 
 3. **Trigger the Workflow**:
    - The workflow will run automatically on every push to the main/master branch
@@ -40,14 +40,22 @@ To use the HuggingFace sync feature, you'll need:
 
 ### How It Works
 
-The workflow:
-1. Clones your repository
-2. Checks if a HuggingFace Space with the same name exists
-3. Creates one if it doesn't exist
-4. Configures the Space with Streamlit as the SDK
-5. Copies all necessary files from your repository
-6. Adds HuggingFace-specific configuration files
-7. Pushes everything to the HuggingFace Space repository
+The workflow uses the official [Hugging Face Spaces GitHub Action](https://github.com/huggingface/huggingface-spaces) to:
+
+1. Check if your Hugging Face token works
+2. Create a Hugging Face Space with the same name as your GitHub repository
+3. Configure the Space with Streamlit as the SDK
+4. Deploy your code to the Space
+5. Set up any required secrets
+
+### Troubleshooting
+
+If you encounter issues:
+
+1. **Authentication Errors**: Make sure your HF_TOKEN has write permissions and hasn't expired
+2. **Permission Issues**: Verify your Hugging Face account has permission to create Spaces
+3. **Name Conflicts**: Ensure no other Space with the same name already exists
+4. **Missing Variables**: Check that all required secrets are set in GitHub
 
 ## Local Development
 
